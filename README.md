@@ -8,8 +8,10 @@ A cozy onsen-themed hydration tracker prototype. Drink water, and your capybara'
 
 - **Spa (Home):** live net-hydration ring, streak, and an animated SVG onsen with four unlock stages
   (towel at 26%, yuzu + rubber duck at 51%, turtle + bamboo spout + golden glow at 76%, confetti at 100%).
+  The towel drops onto Capy's head with a squash-and-puff landing when you cross 26%.
   Tap Capy for a squish, hearts and a bliss toast. Quick-add Water / Green Tea / Americano / Custom, each with Undo.
-- **Log:** today's drinks with inline edit (type, volume, time) and delete with an Undo toast; an adjustable hydration calculator.
+- **Log:** today's drinks with inline edit (type, volume, time) and delete with an Undo toast; swipe a row right to edit or
+  left to delete (a short swipe reveals the button, a long swipe acts at once); an adjustable hydration calculator.
 - **Stats:** hourly intake bars by period, weekly trend vs the 2,500 ml target (this week / last week),
   beverage mix, and a mood check-in whose correlation insight is computed from the mock history and stays locked until
   there are 30 days of check-ins (at least 5 above and 5 below 90% hydration).

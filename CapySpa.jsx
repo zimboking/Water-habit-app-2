@@ -228,10 +228,25 @@ const STYLES = `
 .cs-timer { transform-origin: 0 50%; animation-name: cs-timer; animation-timing-function: linear; animation-fill-mode: forwards; }
 @keyframes cs-pop { 0% { transform: scale(1) } 40% { transform: scale(1.12) } 100% { transform: scale(1) } }
 .cs-pop { animation: cs-pop .45s ease-out; }
+@keyframes cs-towel-drop {
+  0% { transform: translateY(-110px) rotate(-22deg); opacity: 0 }
+  12% { opacity: 1 }
+  50% { transform: translateY(0) rotate(5deg) scale(1,1) }
+  60% { transform: translateY(0) rotate(2deg) scale(1.12,.78) }
+  74% { transform: translateY(-7px) rotate(-3deg) scale(.95,1.06) }
+  88% { transform: translateY(0) rotate(1deg) scale(1.03,.97) }
+  100% { transform: translateY(0) rotate(0) scale(1,1) }
+}
+.cs-towel-drop { transform-box: fill-box; transform-origin: 50% 100%; animation: cs-towel-drop 1.1s cubic-bezier(.3,.7,.4,1) both; }
+@keyframes cs-towel-land { 0%,45% { transform: scale(1,1) } 58% { transform: scale(1.04,.95) } 75% { transform: scale(.99,1.02) } 100% { transform: scale(1,1) } }
+.cs-towel-land { transform-box: fill-box; transform-origin: 50% 100%; animation: cs-towel-land 1.1s ease-out; }
+@keyframes cs-puff { 0%,50% { transform: scale(.2); opacity: 0 } 58% { opacity: .95 } 100% { transform: translate(var(--dx),-6px) scale(1.5); opacity: 0 } }
+.cs-puff { transform-box: fill-box; transform-origin: 50% 50%; animation: cs-puff 1.1s ease-out both; }
 .cs-noscroll::-webkit-scrollbar { display: none; }
 .cs-noscroll { scrollbar-width: none; }
 @media (prefers-reduced-motion: reduce) {
-  .cs-steam, .cs-bob, .cs-wave, .cs-breathe, .cs-pour, .cs-ripple, .cs-glow, .cs-twinkle, .cs-turtle { animation: none !important; }
+  .cs-steam, .cs-bob, .cs-wave, .cs-breathe, .cs-pour, .cs-ripple, .cs-glow, .cs-twinkle, .cs-turtle, .cs-towel-drop, .cs-towel-land { animation: none !important; }
+  .cs-puff { display: none; }
 }
 `;
 
@@ -266,7 +281,7 @@ const SPLASH_DROPS = Array.from({ length: 12 }, (_, i) => {
   return { dx: Math.cos(a) * 60, dy: Math.sin(a) * 42 - 18, r: 4 + (i % 3) };
 });
 
-function OnsenScene({ pct, id, compact = false, onTap, squish = false, splashKey = 0 }) {
+function OnsenScene({ pct, id, compact = false, onTap, squish = false, splashKey = 0, towelDrop = 0 }) {
   const stage = stageFor(pct);
   const level = clamp(pct, 0, 100);
   const waterY = 198 - level * 0.48; // 198 (shallow) to 150 (neck deep)
@@ -345,7 +360,7 @@ function OnsenScene({ pct, id, compact = false, onTap, squish = false, splashKey
         role={onTap ? 'button' : undefined}
         aria-label={onTap ? 'Tap Capy' : undefined}
       >
-        <g className={squish ? 'cs-squish' : 'cs-breathe'}>
+        <g className={squish ? 'cs-squish' : towelDrop ? 'cs-towel-land' : 'cs-breathe'}>
           <ellipse cx="160" cy="166" rx="58" ry="46" fill="#a47148" />
           <ellipse cx="160" cy="178" rx="42" ry="30" fill="#b98556" />
           <ellipse cx="136" cy="150" rx="10" ry="7" fill="#8b5a33" />
@@ -361,11 +376,13 @@ function OnsenScene({ pct, id, compact = false, onTap, squish = false, splashKey
           <ellipse cx="187" cy="102" rx="7" ry="4" fill="#fb7185" opacity="0.4" />
 
           {stage >= 1 && (
-            <g transform="rotate(-7 160 60)">
-              <rect x="134" y="54" width="52" height="15" rx="6" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="1.5" />
-              <rect x="139" y="45" width="42" height="12" rx="5" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1.5" />
-              <line x1="139" y1="61.5" x2="181" y2="61.5" stroke="#7dd3fc" strokeWidth="2" />
-              <line x1="143" y1="51" x2="177" y2="51" stroke="#7dd3fc" strokeWidth="1.5" />
+            <g key={`towel-${towelDrop}`} className={towelDrop ? 'cs-towel-drop' : undefined}>
+              <g transform="rotate(-7 160 60)">
+                <rect x="134" y="54" width="52" height="15" rx="6" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="1.5" />
+                <rect x="139" y="45" width="42" height="12" rx="5" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1.5" />
+                <line x1="139" y1="61.5" x2="181" y2="61.5" stroke="#7dd3fc" strokeWidth="2" />
+                <line x1="143" y1="51" x2="177" y2="51" stroke="#7dd3fc" strokeWidth="1.5" />
+              </g>
             </g>
           )}
 
@@ -385,6 +402,20 @@ function OnsenScene({ pct, id, compact = false, onTap, squish = false, splashKey
           )}
         </g>
       </g>
+
+      {/* Towel landing puffs */}
+      {towelDrop > 0 && stage >= 1 && (
+        <g key={`puff-${towelDrop}`}>
+          {[
+            [130, 64, -14, 7],
+            [190, 64, 14, 7],
+            [146, 46, -8, 5],
+            [174, 46, 8, 5],
+          ].map(([cx, cy, dx, r]) => (
+            <circle key={cx} className="cs-puff" style={{ '--dx': `${dx}px` }} cx={cx} cy={cy} r={r} fill="#ffffff" stroke="#e2e8f0" strokeWidth="1" />
+          ))}
+        </g>
+      )}
 
       {/* Water, clipped to the basin, rises with progress */}
       <g clipPath={`url(#${ref('basin')})`}>
@@ -674,7 +705,7 @@ function CustomDrawer({ open, onClose, onAdd }) {
 /* HOME TAB                                                            */
 /* ------------------------------------------------------------------ */
 
-function HomeTab({ total, pct, stage, streak, onQuickAdd, onCustom, onCapyTap, squish, hearts, pulseKey }) {
+function HomeTab({ total, pct, stage, streak, onQuickAdd, onCustom, onCapyTap, squish, hearts, pulseKey, towelDrop }) {
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
@@ -734,7 +765,7 @@ function HomeTab({ total, pct, stage, streak, onQuickAdd, onCustom, onCapyTap, s
       {/* Onsen */}
       <div className="rounded-3xl overflow-hidden border border-emerald-100 shadow-sm bg-white">
         <div className="relative">
-          <OnsenScene pct={pct} id="home" onTap={onCapyTap} squish={squish} />
+          <OnsenScene pct={pct} id="home" onTap={onCapyTap} squish={squish} towelDrop={towelDrop} />
           <div className="absolute top-3 left-3 bg-white rounded-full px-3 py-1 text-xs font-bold text-slate-700 shadow-sm flex items-center gap-1">
             {STAGES[stage].emoji} {STAGES[stage].name}
           </div>
@@ -800,7 +831,166 @@ function HomeTab({ total, pct, stage, streak, onQuickAdd, onCustom, onCapyTap, s
 /* LOG TAB                                                             */
 /* ------------------------------------------------------------------ */
 
-function LogRow({ log, editing, onEdit, onCancel, onSave, onDelete }) {
+const SWIPE_REVEAL = 84; // px an action panel opens to
+const SWIPE_COMMIT = 0.5; // fraction of row width that triggers the action on release
+
+// Swipe left to delete, right to edit. A short swipe parks the row open on the action
+// button; a long swipe runs the action straight away. Vertical drags scroll the list.
+function SwipeRow({ children, disabled, isOpen, onOpen, onClose, onTouchStart, onEdit, onDelete, className = '' }) {
+  const ref = useRef(null);
+  const drag = useRef(null);
+  const didDrag = useRef(false);
+  const dxRef = useRef(0);
+  const [dx, setDxState] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+
+  const setDx = (v) => {
+    dxRef.current = v;
+    setDxState(v);
+  };
+  const width = () => (ref.current ? ref.current.offsetWidth : 320);
+
+  useEffect(() => {
+    if (!isOpen && !drag.current && !leaving) setDx(0);
+  }, [isOpen, leaving]);
+  useEffect(() => {
+    if (disabled) setDx(0);
+  }, [disabled]);
+
+  const onPointerDown = (e) => {
+    if (!isOpen && onTouchStart) onTouchStart(); // touching another row closes the open one
+    if (disabled || leaving || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    drag.current = { x: e.clientX, y: e.clientY, base: dxRef.current, axis: null, id: e.pointerId };
+    didDrag.current = false;
+  };
+
+  const onPointerMove = (e) => {
+    const d = drag.current;
+    if (!d || e.pointerId !== d.id) return;
+    const mx = e.clientX - d.x;
+    const my = e.clientY - d.y;
+    if (!d.axis) {
+      if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
+      d.axis = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
+      if (d.axis === 'y') {
+        drag.current = null;
+        return;
+      }
+      if (e.currentTarget.setPointerCapture) e.currentTarget.setPointerCapture(e.pointerId);
+      didDrag.current = true;
+      setDragging(true);
+      onOpen();
+    }
+    const limit = width() * 0.85;
+    let next = d.base + mx;
+    if (Math.abs(next) > limit) next = Math.sign(next) * (limit + (Math.abs(next) - limit) * 0.25);
+    setDx(next);
+  };
+
+  const onPointerEnd = () => {
+    const d = drag.current;
+    drag.current = null;
+    if (!d || d.axis !== 'x') return;
+    setDragging(false);
+    const w = width();
+    const x = dxRef.current;
+    if (x <= -w * SWIPE_COMMIT) {
+      setLeaving(true);
+      setDx(-w - 24);
+      setTimeout(onDelete, 220);
+    } else if (x >= w * SWIPE_COMMIT) {
+      setDx(0);
+      onClose();
+      onEdit();
+    } else if (x <= -SWIPE_REVEAL / 2) {
+      setDx(-SWIPE_REVEAL);
+    } else if (x >= SWIPE_REVEAL / 2) {
+      setDx(SWIPE_REVEAL);
+    } else {
+      setDx(0);
+      onClose();
+    }
+  };
+
+  // Swallow the click that ends a drag, and let a tap on an open row close it.
+  const onClickCapture = (e) => {
+    if (didDrag.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      didDrag.current = false;
+      return;
+    }
+    if (dxRef.current !== 0 && !leaving) {
+      e.preventDefault();
+      e.stopPropagation();
+      setDx(0);
+      onClose();
+    }
+  };
+
+  const armed = Math.abs(dx) >= width() * SWIPE_COMMIT;
+  const panelBtn = 'h-full flex flex-col items-center justify-center gap-0.5 text-white text-xs font-bold';
+
+  return (
+    <div ref={ref} className="relative overflow-hidden">
+      {dx > 0 && (
+        <div className={`absolute inset-0 flex items-stretch justify-start ${armed ? 'bg-sky-700' : 'bg-sky-600'}`}>
+          <button
+            tabIndex={-1}
+            className={panelBtn}
+            style={{ width: SWIPE_REVEAL }}
+            onClick={() => {
+              setDx(0);
+              onClose();
+              onEdit();
+            }}
+          >
+            <Edit3 size={18} style={{ transform: armed ? 'scale(1.25)' : 'none', transition: 'transform .15s' }} />
+            Edit
+          </button>
+        </div>
+      )}
+      {dx < 0 && (
+        <div className={`absolute inset-0 flex items-stretch justify-end ${armed ? 'bg-rose-600' : 'bg-rose-500'}`}>
+          <button
+            tabIndex={-1}
+            className={panelBtn}
+            style={{ width: SWIPE_REVEAL }}
+            onClick={() => {
+              setLeaving(true);
+              setDx(-width() - 24);
+              setTimeout(onDelete, 220);
+            }}
+          >
+            <Trash2 size={18} style={{ transform: armed ? 'scale(1.25)' : 'none', transition: 'transform .15s' }} />
+            Delete
+          </button>
+        </div>
+      )}
+      <div
+        className={`relative ${className}`}
+        style={{
+          transform: `translateX(${dx}px)`,
+          transition: dragging ? 'none' : 'transform .25s cubic-bezier(.2,.9,.3,1)',
+          touchAction: 'pan-y',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+        }}
+        onDragStart={(e) => e.preventDefault()}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerEnd}
+        onPointerCancel={onPointerEnd}
+        onClickCapture={onClickCapture}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function LogRow({ log, editing, onEdit, onCancel, onSave, onDelete, swipeOpen, onSwipeOpen, onSwipeClose, onSwipeTouch }) {
   const b = BEVERAGES[log.type];
   const [draft, setDraft] = useState({ type: log.type, volume: log.volume, time: toHHMM(log.ts) });
 
@@ -813,7 +1003,17 @@ function LogRow({ log, editing, onEdit, onCancel, onSave, onDelete }) {
   const draftNet = Math.round(draft.volume * ratios[draft.type]);
 
   return (
-    <div className={`rounded-2xl border transition ${editing ? 'border-sky-200 bg-sky-50' : 'border-slate-100 bg-white'}`}>
+    <div className={`rounded-2xl border overflow-hidden transition ${editing ? 'border-sky-200 bg-sky-50' : 'border-slate-100 bg-white'}`}>
+      <SwipeRow
+        disabled={editing}
+        isOpen={swipeOpen}
+        onOpen={onSwipeOpen}
+        onClose={onSwipeClose}
+        onTouchStart={onSwipeTouch}
+        onEdit={onEdit}
+        onDelete={onDelete}
+        className={editing ? 'bg-sky-50' : 'bg-white'}
+      >
       <div className="flex items-center gap-3 p-3">
         <BevBadge type={log.type} />
         <div className="flex-1 min-w-0">
@@ -841,6 +1041,7 @@ function LogRow({ log, editing, onEdit, onCancel, onSave, onDelete }) {
           </div>
         )}
       </div>
+      </SwipeRow>
       {editing && (
         <div className="px-3 pb-3 space-y-3 cs-rise">
           <TypePicker value={draft.type} onChange={(type) => setDraft((d) => ({ ...d, type }))} />
@@ -934,6 +1135,7 @@ function HydrationCalculator({ ratios, onRatio }) {
 
 function LogTab({ logs, totalVol, totalNet, onUpdate, onDelete, onCustom, ratios, onRatio }) {
   const [editingId, setEditingId] = useState(null);
+  const [swipeId, setSwipeId] = useState(null);
   const sorted = useMemo(() => [...logs].sort((a, b) => b.ts - a.ts), [logs]);
 
   return (
@@ -964,6 +1166,11 @@ function LogTab({ logs, totalVol, totalNet, onUpdate, onDelete, onCustom, ratios
       </div>
 
       <div className="space-y-2">
+        {sorted.length > 0 && (
+          <p className="text-xs text-slate-500 flex items-center gap-1.5 px-1">
+            <ChevronRight size={14} className="text-slate-400" /> Swipe a drink right to edit, left to delete.
+          </p>
+        )}
         {sorted.length === 0 && (
           <div className="text-center bg-white rounded-3xl border border-dashed border-slate-200 p-8">
             <div className="text-4xl">🫙</div>
@@ -976,6 +1183,10 @@ function LogTab({ logs, totalVol, totalNet, onUpdate, onDelete, onCustom, ratios
             key={log.id}
             log={log}
             editing={editingId === log.id}
+            swipeOpen={swipeId === log.id}
+            onSwipeOpen={() => setSwipeId(log.id)}
+            onSwipeClose={() => setSwipeId((id) => (id === log.id ? null : id))}
+            onSwipeTouch={() => setSwipeId(null)}
             onEdit={() => setEditingId(log.id)}
             onCancel={() => setEditingId(null)}
             onSave={(patch) => {
@@ -1592,6 +1803,7 @@ export default function CapySpa() {
   const [squish, setSquish] = useState(false);
   const [confetti, setConfetti] = useState(0);
   const [pulseKey, setPulseKey] = useState(0);
+  const [towelDrop, setTowelDrop] = useState(0);
   const [mood, setMood] = useState(null);
   const [friends, setFriends] = useState(makeInitialFriends);
   const [feed, setFeed] = useState(makeInitialFeed);
@@ -1665,6 +1877,20 @@ export default function CapySpa() {
     }
     prevNet.current = totalNet;
   }, [totalNet]);
+
+  // Towel drops onto Capy's head whenever today's total climbs into the towel stage.
+  const prevStage = useRef(stage);
+  useEffect(() => {
+    if (prevStage.current < 1 && stage >= 1) setTowelDrop((k) => k + 1);
+    prevStage.current = stage;
+  }, [stage]);
+
+  // Clear the flag after the animation has played on the Home tab, so it can't replay on tab switches.
+  useEffect(() => {
+    if (!towelDrop || tab !== 'home') return undefined;
+    const t = setTimeout(() => setTowelDrop(0), 1600);
+    return () => clearTimeout(t);
+  }, [towelDrop, tab]);
 
   useEffect(() => {
     if (!confetti) return undefined;
@@ -1822,6 +2048,7 @@ export default function CapySpa() {
               squish={squish}
               hearts={hearts}
               pulseKey={pulseKey}
+              towelDrop={towelDrop}
             />
           )}
           {tab === 'log' && (
