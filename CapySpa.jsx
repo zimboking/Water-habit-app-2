@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, createContext, useContext } from 'react';
 import {
   Droplets,
   Coffee,
@@ -32,19 +32,26 @@ import {
 const GOAL = 2500;
 const PRIOR_STREAK = 6; // consecutive completed days before today that hit the goal
 
-// Net hydration ratios live in one place so they can be tuned without touching UI code.
 const BEVERAGES = {
-  water: { label: 'Water', category: 'Water', emoji: '💧', ratio: 1, color: '#0284c7', tint: '#e0f2fe', note: 'Baseline. Every ml counts in full.' },
-  tea: { label: 'Green Tea', category: 'Tea', emoji: '🍵', ratio: 0.95, color: '#059669', tint: '#d1fae5', note: 'Mild caffeine, small deduction.' },
-  coffee: { label: 'Espresso', category: 'Coffee', emoji: '☕', ratio: 0.8, color: '#92400e', tint: '#fef3c7', note: 'Higher caffeine, larger deduction.' },
-  juice: { label: 'Juice', category: 'Juice', emoji: '🧃', ratio: 0.9, color: '#ca8a04', tint: '#fef9c3', note: 'Sugar content, small deduction.' },
+  water: { label: 'Water', category: 'Water', emoji: '💧', color: '#0284c7', tint: '#e0f2fe', note: 'The reference drink.' },
+  tea: { label: 'Green Tea', category: 'Tea', emoji: '🍵', color: '#059669', tint: '#d1fae5', note: 'Hydrates like water at everyday intake.' },
+  coffee: { label: 'Coffee', category: 'Coffee', emoji: '☕', color: '#92400e', tint: '#fef3c7', note: 'Hydrates like water up to about 4 mugs a day.' },
+  juice: { label: 'Juice', category: 'Juice', emoji: '🧃', color: '#ca8a04', tint: '#fef9c3', note: 'Hydrates at least as well as water in lab tests.' },
 };
+
+// Net hydration = volume × ratio. Defaults follow the Beverage Hydration Index
+// (Maughan et al., 2016) and Killer et al. (2014): at everyday intake, tea, coffee
+// and juice hydrate like water. Users can adjust ratios in the Log tab.
+const DEFAULT_RATIOS = { water: 1, tea: 1, coffee: 1, juice: 1 };
+const RATIO_MIN = 0.5;
+const RATIO_MAX = 1.5;
+const RatiosContext = createContext(DEFAULT_RATIOS);
 const TYPE_ORDER = ['water', 'tea', 'coffee', 'juice'];
 
 const QUICK_ADDS = [
   { type: 'water', volume: 250, label: 'Water', emoji: '💧', ring: 'border-sky-200 hover:bg-sky-50' },
   { type: 'tea', volume: 300, label: 'Green Tea', emoji: '🍵', ring: 'border-emerald-200 hover:bg-emerald-50' },
-  { type: 'coffee', volume: 200, label: 'Espresso', emoji: '☕', ring: 'border-amber-200 hover:bg-amber-50' },
+  { type: 'coffee', volume: 200, label: 'Americano', name: 'Americano', emoji: '☕', ring: 'border-amber-200 hover:bg-amber-50' },
 ];
 
 const STAGES = [
@@ -62,8 +69,34 @@ const MOODS = {
 };
 const MOOD_ORDER = ['energy', 'focused', 'tired', 'headachy'];
 
-// 13 completed days, oldest first (day -13 .. day -1). Net ml + the mood check-in for that day.
+// The mood insight stays hidden until there is enough data to mean something.
+const INSIGHT_MIN_DAYS = 30;
+const INSIGHT_MIN_PER_GROUP = 5;
+
+// 35 completed days, oldest first (day -35 .. day -1). Net ml + the mood check-in for that day.
 const HISTORY = [
+  { total: 1800, mood: 'tired' },
+  { total: 2400, mood: 'focused' },
+  { total: 2650, mood: 'energy' },
+  { total: 2100, mood: 'focused' },
+  { total: 1950, mood: 'focused' },
+  { total: 2550, mood: 'focused' },
+  { total: 2300, mood: 'tired' },
+  { total: 2700, mood: 'energy' },
+  { total: 1700, mood: 'headachy' },
+  { total: 2450, mood: 'focused' },
+  { total: 2600, mood: 'focused' },
+  { total: 2000, mood: 'tired' },
+  { total: 2250, mood: 'focused' },
+  { total: 2800, mood: 'energy' },
+  { total: 1850, mood: 'tired' },
+  { total: 2500, mood: 'focused' },
+  { total: 2350, mood: 'tired' },
+  { total: 2750, mood: 'focused' },
+  { total: 2050, mood: 'headachy' },
+  { total: 2600, mood: 'energy' },
+  { total: 1900, mood: 'focused' },
+  { total: 2480, mood: 'focused' },
   { total: 2150, mood: 'focused' },
   { total: 1900, mood: 'headachy' },
   { total: 2600, mood: 'focused' },
@@ -90,7 +123,8 @@ const PERIODS = {
 /* ------------------------------------------------------------------ */
 
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
-const netOf = (log) => Math.round(log.volume * BEVERAGES[log.type].ratio);
+const netWith = (ratios, log) => Math.round(log.volume * ratios[log.type]);
+const drinkName = (log) => log.name || BEVERAGES[log.type].label;
 const pctOf = (total, goal) => Math.floor((total * 100) / goal);
 const stageFor = (pct) => (pct >= 76 ? 3 : pct >= 51 ? 2 : pct >= 26 ? 1 : 0);
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -131,15 +165,15 @@ const uid = (p = 'id') => `${p}-${Date.now().toString(36)}-${(seq++).toString(36
 // Mock sips are placed relative to "now" so the demo reads naturally at any hour.
 const MOCK_SIPS = [
   ['water', 400, 480],
-  ['coffee', 200, 405],
+  ['coffee', 200, 405, 'Americano'],
   ['water', 250, 320],
   ['tea', 300, 230],
-  ['water', 500, 140],
+  ['water', 400, 140],
   ['juice', 250, 45],
 ];
 const makeInitialLogs = () => {
   const now = Date.now();
-  return MOCK_SIPS.map(([type, volume, minsAgo], i) => ({ id: `log-${i + 1}`, type, volume, ts: now - minsAgo * 60000 }));
+  return MOCK_SIPS.map(([type, volume, minsAgo, name], i) => ({ id: `log-${i + 1}`, type, volume, name, ts: now - minsAgo * 60000 }));
 };
 
 const makeInitialFriends = () => [
@@ -503,6 +537,7 @@ function BevBadge({ type, size = 'md' }) {
 }
 
 function TypePicker({ value, onChange }) {
+  const ratios = useContext(RatiosContext);
   return (
     <div className="grid grid-cols-4 gap-2">
       {TYPE_ORDER.map((t) => {
@@ -517,7 +552,7 @@ function TypePicker({ value, onChange }) {
           >
             <div className="text-xl leading-none">{b.emoji}</div>
             <div className="text-xs font-semibold text-slate-700 mt-1 truncate">{b.label}</div>
-            <div className="text-xs text-slate-500">{Math.round(b.ratio * 100)}%</div>
+            <div className="text-xs text-slate-500">×{ratios[t].toFixed(2)}</div>
           </button>
         );
       })}
@@ -578,9 +613,10 @@ function CustomDrawer({ open, onClose, onAdd }) {
     if (open) setTime(toHHMM(Date.now()));
   }, [open]);
 
+  const ratios = useContext(RatiosContext);
   if (!open) return null;
   const b = BEVERAGES[type];
-  const net = Math.round(volume * b.ratio);
+  const net = Math.round(volume * ratios[type]);
 
   return (
     <div className="absolute inset-0 z-50 flex flex-col justify-end">
@@ -616,7 +652,7 @@ function CustomDrawer({ open, onClose, onAdd }) {
           <div className="text-right">
             <div className="text-xs text-slate-500">Net hydration</div>
             <div className="font-bold text-slate-800">
-              {net} ml <span className="text-slate-500 font-normal text-sm">({Math.round(b.ratio * 100)}%)</span>
+              {net} ml <span className="text-slate-500 font-normal text-sm">(×{ratios[type].toFixed(2)})</span>
             </div>
           </div>
         </div>
@@ -732,7 +768,7 @@ function HomeTab({ total, pct, stage, streak, onQuickAdd, onCustom, onCapyTap, s
           {QUICK_ADDS.map((q) => (
             <button
               key={q.type}
-              onClick={() => onQuickAdd(q.type, q.volume)}
+              onClick={() => onQuickAdd(q)}
               className={`rounded-2xl border ${q.ring} py-2 px-1 text-center active:scale-95 transition`}
               aria-label={`Add ${q.volume} ml ${q.label}`}
             >
@@ -772,7 +808,9 @@ function LogRow({ log, editing, onEdit, onCancel, onSave, onDelete }) {
     if (editing) setDraft({ type: log.type, volume: log.volume, time: toHHMM(log.ts) });
   }, [editing, log]);
 
-  const draftNet = Math.round(draft.volume * BEVERAGES[draft.type].ratio);
+  const ratios = useContext(RatiosContext);
+  const name = drinkName(log);
+  const draftNet = Math.round(draft.volume * ratios[draft.type]);
 
   return (
     <div className={`rounded-2xl border transition ${editing ? 'border-sky-200 bg-sky-50' : 'border-slate-100 bg-white'}`}>
@@ -780,24 +818,24 @@ function LogRow({ log, editing, onEdit, onCancel, onSave, onDelete }) {
         <BevBadge type={log.type} />
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline justify-between gap-2">
-            <span className="font-bold text-slate-800 truncate">{b.label}</span>
+            <span className="font-bold text-slate-800 truncate">{name}</span>
             <span className="font-bold text-slate-800 shrink-0">{log.volume} ml</span>
           </div>
           <div className="flex items-baseline justify-between gap-2 text-xs text-slate-500">
             <span>
-              {timeLabel(log.ts)} · {Math.round(b.ratio * 100)}% ratio
+              {timeLabel(log.ts)} · ×{ratios[log.type].toFixed(2)}
             </span>
             <span className="shrink-0">
-              <span className="text-sky-700 font-semibold">{netOf(log)} ml</span> net
+              <span className="text-sky-700 font-semibold">{netWith(ratios, log)} ml</span> net
             </span>
           </div>
         </div>
         {!editing && (
           <div className="flex gap-1 shrink-0">
-            <button onClick={onEdit} aria-label={`Edit ${b.label} at ${timeLabel(log.ts)}`} className="w-9 h-9 rounded-xl hover:bg-slate-100 text-slate-500 flex items-center justify-center">
+            <button onClick={onEdit} aria-label={`Edit ${name} at ${timeLabel(log.ts)}`} className="w-9 h-9 rounded-xl hover:bg-slate-100 text-slate-500 flex items-center justify-center">
               <Edit3 size={16} />
             </button>
-            <button onClick={onDelete} aria-label={`Delete ${b.label} at ${timeLabel(log.ts)}`} className="w-9 h-9 rounded-xl hover:bg-rose-50 text-rose-500 flex items-center justify-center">
+            <button onClick={onDelete} aria-label={`Delete ${name} at ${timeLabel(log.ts)}`} className="w-9 h-9 rounded-xl hover:bg-rose-50 text-rose-500 flex items-center justify-center">
               <Trash2 size={16} />
             </button>
           </div>
@@ -821,7 +859,7 @@ function LogRow({ log, editing, onEdit, onCancel, onSave, onDelete }) {
               Cancel
             </button>
             <button
-              onClick={() => onSave({ type: draft.type, volume: draft.volume, ts: tsFromHHMM(draft.time) })}
+              onClick={() => onSave({ type: draft.type, volume: draft.volume, ts: tsFromHHMM(draft.time), name: draft.type === log.type ? log.name : undefined })}
               className="flex-1 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold flex items-center justify-center gap-1"
             >
               <Check size={16} /> Save
@@ -833,7 +871,68 @@ function LogRow({ log, editing, onEdit, onCancel, onSave, onDelete }) {
   );
 }
 
-function LogTab({ logs, totalVol, totalNet, onUpdate, onDelete, onCustom }) {
+function HydrationCalculator({ ratios, onRatio }) {
+  const custom = TYPE_ORDER.some((t) => ratios[t] !== DEFAULT_RATIOS[t]);
+  const step = (t, d) => onRatio(t, Math.round(clamp(ratios[t] + d, RATIO_MIN, RATIO_MAX) * 100) / 100);
+  return (
+    <Card>
+      <CardTitle
+        icon={Info}
+        title="Hydration calculator"
+        right={
+          custom && (
+            <button onClick={() => TYPE_ORDER.forEach((t) => onRatio(t, DEFAULT_RATIOS[t]))} className="text-xs font-semibold text-sky-700 hover:underline">
+              Reset defaults
+            </button>
+          )
+        }
+      />
+      <p className="text-sm text-slate-600 mb-3">
+        Net hydration = volume × ratio. Capy's onsen, your goal and your streak all track <b>net ml</b>.
+      </p>
+      <div className="space-y-3">
+        {TYPE_ORDER.map((t) => {
+          const b = BEVERAGES[t];
+          const r = ratios[t];
+          return (
+            <div key={t} className="flex items-center gap-3">
+              <BevBadge type={t} size="sm" />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-slate-800">{b.label}</div>
+                <div className="text-xs text-slate-500">{r === DEFAULT_RATIOS[t] ? b.note : `Custom ratio. 250 ml counts as ${Math.round(250 * r)} ml.`}</div>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => step(t, -0.05)}
+                  disabled={r <= RATIO_MIN}
+                  aria-label={`Lower ${b.label} ratio`}
+                  className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center disabled:opacity-40"
+                >
+                  <Minus size={14} />
+                </button>
+                <span className={`w-12 text-center text-sm font-bold ${r === DEFAULT_RATIOS[t] ? 'text-slate-800' : 'text-amber-700'}`}>×{r.toFixed(2)}</span>
+                <button
+                  onClick={() => step(t, 0.05)}
+                  disabled={r >= RATIO_MAX}
+                  aria-label={`Raise ${b.label} ratio`}
+                  className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center disabled:opacity-40"
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-xs text-slate-500 mt-3">
+        Defaults follow the Beverage Hydration Index (Maughan et al., 2016) and a coffee trial by Killer et al. (2014): at everyday intake these drinks hydrate like water. Change a ratio only
+        if your clinician advises it. Changes apply to all of today's drinks.
+      </p>
+    </Card>
+  );
+}
+
+function LogTab({ logs, totalVol, totalNet, onUpdate, onDelete, onCustom, ratios, onRatio }) {
   const [editingId, setEditingId] = useState(null);
   const sorted = useMemo(() => [...logs].sort((a, b) => b.ts - a.ts), [logs]);
 
@@ -891,38 +990,7 @@ function LogTab({ logs, totalVol, totalNet, onUpdate, onDelete, onCustom }) {
         ))}
       </div>
 
-      <Card>
-        <CardTitle icon={Info} title="Hydration calculator" />
-        <p className="text-sm text-slate-600 mb-3">
-          Net hydration = volume × beverage ratio. Capy's onsen, your goal and your streak all track <b>net ml</b>.
-        </p>
-        <div className="space-y-3">
-          {TYPE_ORDER.map((t) => {
-            const b = BEVERAGES[t];
-            const sample = t === 'coffee' ? 200 : t === 'tea' ? 300 : 250;
-            return (
-              <div key={t} className="flex items-center gap-3">
-                <BevBadge type={t} size="sm" />
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between text-sm">
-                    <span className="font-semibold text-slate-800">{b.label}</span>
-                    <span className="font-bold text-slate-800">×{b.ratio.toFixed(2)}</span>
-                  </div>
-                  <div className="h-1.5 bg-slate-100 rounded-full mt-1 overflow-hidden">
-                    <div className="h-full rounded-full" style={{ width: `${b.ratio * 100}%`, background: b.color }} />
-                  </div>
-                  <div className="flex justify-between text-xs text-slate-500 mt-1">
-                    <span>{b.note}</span>
-                    <span className="shrink-0 ml-2">
-                      {sample} → {Math.round(sample * b.ratio)} ml
-                    </span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
+      <HydrationCalculator ratios={ratios} onRatio={onRatio} />
     </div>
   );
 }
@@ -938,13 +1006,14 @@ const topRoundedBar = (x, y, w, h, r) => {
 };
 
 function HourlyChart({ logs }) {
+  const ratios = useContext(RatiosContext);
   const buckets = useMemo(() => {
     const b = Array(24).fill(0);
     logs.forEach((l) => {
-      b[new Date(l.ts).getHours()] += netOf(l);
+      b[new Date(l.ts).getHours()] += netWith(ratios, l);
     });
     return b;
-  }, [logs]);
+  }, [logs, ratios]);
   const periodTotals = useMemo(() => {
     const t = { morning: 0, afternoon: 0, evening: 0 };
     buckets.forEach((v, h) => {
@@ -1036,9 +1105,9 @@ function WeeklyChart({ todayTotal }) {
   const [week, setWeek] = useState('this');
   const data = useMemo(() => {
     if (week === 'this') {
-      return [...HISTORY.slice(7).map((d, i) => ({ total: d.total, date: daysAgo(6 - i) })), { total: todayTotal, date: daysAgo(0), today: true }];
+      return [...HISTORY.slice(-6).map((d, i) => ({ total: d.total, date: daysAgo(6 - i) })), { total: todayTotal, date: daysAgo(0), today: true }];
     }
-    return HISTORY.slice(0, 7).map((d, i) => ({ total: d.total, date: daysAgo(13 - i) }));
+    return HISTORY.slice(-13, -6).map((d, i) => ({ total: d.total, date: daysAgo(13 - i) }));
   }, [week, todayTotal]);
   const [sel, setSel] = useState(null);
   useEffect(() => setSel(null), [week]);
@@ -1202,13 +1271,14 @@ function MoodCard({ mood, onMood, pct, onQuickWater }) {
   const insight = useMemo(() => {
     const hi = HISTORY.filter((d) => d.total > GOAL * 0.9);
     const lo = HISTORY.filter((d) => d.total <= GOAL * 0.9);
-    const avg = (arr) => arr.reduce((s, d) => s + MOODS[d.mood].score, 0) / arr.length;
+    const avg = (arr) => (arr.length ? arr.reduce((s, d) => s + MOODS[d.mood].score, 0) / arr.length : 0);
     const hiAvg = avg(hi);
     const loAvg = avg(lo);
-    return { hiAvg, loAvg, hiN: hi.length, loN: lo.length, lift: Math.round(((hiAvg - loAvg) / loAvg) * 100) };
+    const ready = HISTORY.length >= INSIGHT_MIN_DAYS && hi.length >= INSIGHT_MIN_PER_GROUP && lo.length >= INSIGHT_MIN_PER_GROUP;
+    return { ready, hiAvg, loAvg, hiN: hi.length, loN: lo.length, lift: ready ? Math.round(((hiAvg - loAvg) / loAvg) * 100) : 0 };
   }, []);
 
-  const last7 = HISTORY.slice(7).map((d, i) => ({ ...d, date: daysAgo(6 - i) }));
+  const last7 = HISTORY.slice(-6).map((d, i) => ({ ...d, date: daysAgo(6 - i) }));
   const low = mood === 'tired' || mood === 'headachy';
 
   return (
@@ -1265,33 +1335,51 @@ function MoodCard({ mood, onMood, pct, onQuickWater }) {
         </div>
       </div>
 
-      <div className="mt-4 rounded-2xl border border-yellow-200 bg-yellow-50 p-3.5">
-        <div className="flex items-center gap-2 text-sm font-bold text-amber-800">
-          <Sparkles size={16} className="text-yellow-600" /> Correlation insight
-        </div>
-        <p className="text-sm text-slate-700 mt-1.5">
-          On days with <b>&gt;90% hydration</b>, your focus rating averaged <b className="text-amber-800">{insight.lift}% higher</b>.
-        </p>
-        <div className="space-y-1.5 mt-3">
-          {[
-            ['>90%', insight.hiAvg, insight.hiN, '#0284c7'],
-            ['≤90%', insight.loAvg, insight.loN, '#94a3b8'],
-          ].map(([label, v, n, c]) => (
-            <div key={label} className="flex items-center gap-2 text-xs">
-              <span className="w-10 font-semibold text-slate-600 shrink-0">{label}</span>
-              <div className="flex-1 h-2.5 bg-white rounded-full overflow-hidden">
-                <div className="h-full rounded-full" style={{ width: `${(v / 4) * 100}%`, background: c }} />
+      {insight.ready ? (
+        <div className="mt-4 rounded-2xl border border-yellow-200 bg-yellow-50 p-3.5">
+          <div className="flex items-center gap-2 text-sm font-bold text-amber-800">
+            <Sparkles size={16} className="text-yellow-600" /> Correlation insight
+          </div>
+          <p className="text-sm text-slate-700 mt-1.5">
+            On days with <b>&gt;90% hydration</b>, your focus rating averaged <b className="text-amber-800">{insight.lift}% higher</b>.
+          </p>
+          <div className="space-y-1.5 mt-3">
+            {[
+              ['>90%', insight.hiAvg, insight.hiN, '#0284c7'],
+              ['≤90%', insight.loAvg, insight.loN, '#94a3b8'],
+            ].map(([label, v, n, c]) => (
+              <div key={label} className="flex items-center gap-2 text-xs">
+                <span className="w-10 font-semibold text-slate-600 shrink-0">{label}</span>
+                <div className="flex-1 h-2.5 bg-white rounded-full overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${(v / 4) * 100}%`, background: c }} />
+                </div>
+                <span className="w-28 text-right text-slate-600 shrink-0">
+                  <b className="text-slate-800">{v.toFixed(1)}</b>/4 · {n} days
+                </span>
               </div>
-              <span className="w-28 text-right text-slate-600 shrink-0">
-                <b className="text-slate-800">{v.toFixed(1)}</b>/4 · {n} days
-              </span>
-            </div>
-          ))}
+            ))}
+          </div>
+          <p className="text-xs text-slate-500 mt-2">
+            Focus rating: ⚡4 😊3 😴2 🤕1. Based on {HISTORY.length} completed days. Correlation, not causation.
+          </p>
         </div>
-        <p className="text-xs text-slate-500 mt-2">
-          Focus rating: ⚡4 😊3 😴2 🤕1. Based on {HISTORY.length} completed days. Correlation, not causation. Confidence firms up after ~30 days.
-        </p>
-      </div>
+      ) : (
+        <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-3.5">
+          <div className="flex items-center gap-2 text-sm font-bold text-slate-700">
+            <Sparkles size={16} className="text-slate-400" /> Insight unlocking
+          </div>
+          <p className="text-sm text-slate-600 mt-1.5">
+            Your first mood insight appears after {INSIGHT_MIN_DAYS} days of check-ins, with at least {INSIGHT_MIN_PER_GROUP} days above and below 90% hydration. Fewer days
+            than that would mostly be noise.
+          </p>
+          <div className="h-2 bg-white rounded-full mt-3 overflow-hidden">
+            <div className="h-full rounded-full bg-amber-500" style={{ width: `${Math.min(100, (HISTORY.length / INSIGHT_MIN_DAYS) * 100)}%` }} />
+          </div>
+          <p className="text-xs text-slate-500 mt-1.5">
+            {Math.min(HISTORY.length, INSIGHT_MIN_DAYS)} of {INSIGHT_MIN_DAYS} days logged
+          </p>
+        </div>
+      )}
     </Card>
   );
 }
@@ -1497,6 +1585,7 @@ const TABS = [
 export default function CapySpa() {
   const [tab, setTab] = useState('home');
   const [logs, setLogs] = useState(makeInitialLogs);
+  const [ratios, setRatios] = useState(DEFAULT_RATIOS);
   const [toast, setToast] = useState(null);
   const [customOpen, setCustomOpen] = useState(false);
   const [hearts, setHearts] = useState([]);
@@ -1535,7 +1624,8 @@ export default function CapySpa() {
   );
 
   /* ---- derived ---- */
-  const totalNet = useMemo(() => logs.reduce((s, l) => s + netOf(l), 0), [logs]);
+  const netOf = useCallback((log) => netWith(ratios, log), [ratios]);
+  const totalNet = useMemo(() => logs.reduce((s, l) => s + netOf(l), 0), [logs, netOf]);
   const totalVol = useMemo(() => logs.reduce((s, l) => s + l.volume, 0), [logs]);
   const pct = pctOf(totalNet, GOAL);
   const stage = stageFor(pct);
@@ -1583,8 +1673,8 @@ export default function CapySpa() {
   }, [confetti]);
 
   /* ---- log actions ---- */
-  const addLog = (type, volume, ts = Date.now()) => {
-    const entry = { id: uid('log'), type, volume, ts };
+  const addLog = (type, volume, ts = Date.now(), name) => {
+    const entry = { id: uid('log'), type, volume, ts, name };
     const net = netOf(entry);
     const after = totalNet + net;
     setLogs((prev) => [...prev, entry]);
@@ -1595,7 +1685,7 @@ export default function CapySpa() {
     if (crossed) sub = 'Goal reached! Full zen unlocked, streak extended 🔥';
     else if (newStage > stage) sub = `Unlocked ${STAGES[newStage].emoji} ${STAGES[newStage].name}!`;
     showToast({
-      message: `+${volume} ml ${BEVERAGES[type].label} ${BEVERAGES[type].emoji}`,
+      message: `+${volume} ml ${drinkName(entry)} ${BEVERAGES[type].emoji}`,
       sub,
       actionLabel: 'Undo',
       duration: 4500,
@@ -1605,7 +1695,7 @@ export default function CapySpa() {
 
   const updateLog = (id, patch) => {
     setLogs((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
-    showToast({ message: 'Log updated ✓', sub: `${patch.volume} ml ${BEVERAGES[patch.type].label} at ${timeLabel(patch.ts)}` });
+    showToast({ message: 'Log updated ✓', sub: `${patch.volume} ml ${drinkName(patch)} at ${timeLabel(patch.ts)}` });
   };
 
   const deleteLog = (id) => {
@@ -1613,7 +1703,7 @@ export default function CapySpa() {
     if (!removed) return;
     setLogs((prev) => prev.filter((l) => l.id !== id));
     showToast({
-      message: `Deleted ${removed.volume} ml ${BEVERAGES[removed.type].label}`,
+      message: `Deleted ${removed.volume} ml ${drinkName(removed)}`,
       sub: `${netOf(removed)} ml net removed from today`,
       actionLabel: 'Undo Log',
       duration: 5000,
@@ -1646,7 +1736,7 @@ export default function CapySpa() {
     (id, type, volume, reason) => {
       const f = friendsRef.current.find((x) => x.id === id);
       if (!f) return;
-      const net = Math.round(volume * BEVERAGES[type].ratio);
+      const net = Math.round(volume * DEFAULT_RATIOS[type]);
       const before = pctOf(f.total, f.goal);
       const after = pctOf(f.total + net, f.goal);
       setFriends((prev) => prev.map((x) => (x.id === id ? { ...x, total: x.total + net, lastType: type, lastTs: Date.now() } : x)));
@@ -1701,6 +1791,7 @@ export default function CapySpa() {
   };
 
   return (
+    <RatiosContext.Provider value={ratios}>
     <div className="min-h-screen bg-emerald-50 font-sans text-slate-800">
       <style>{STYLES}</style>
       <div className="relative max-w-md mx-auto min-h-screen h-screen flex flex-col shadow-2xl rounded-3xl overflow-hidden border border-amber-900/10 bg-slate-50">
@@ -1725,7 +1816,7 @@ export default function CapySpa() {
               pct={pct}
               stage={stage}
               streak={streak}
-              onQuickAdd={(t, v) => addLog(t, v)}
+              onQuickAdd={(q) => addLog(q.type, q.volume, Date.now(), q.name)}
               onCustom={() => setCustomOpen(true)}
               onCapyTap={tapCapy}
               squish={squish}
@@ -1733,7 +1824,18 @@ export default function CapySpa() {
               pulseKey={pulseKey}
             />
           )}
-          {tab === 'log' && <LogTab logs={logs} totalVol={totalVol} totalNet={totalNet} onUpdate={updateLog} onDelete={deleteLog} onCustom={() => setCustomOpen(true)} />}
+          {tab === 'log' && (
+            <LogTab
+              logs={logs}
+              totalVol={totalVol}
+              totalNet={totalNet}
+              onUpdate={updateLog}
+              onDelete={deleteLog}
+              onCustom={() => setCustomOpen(true)}
+              ratios={ratios}
+              onRatio={(t, r) => setRatios((prev) => ({ ...prev, [t]: r }))}
+            />
+          )}
           {tab === 'stats' && <AnalyticsTab logs={logs} total={totalNet} pct={pct} mood={mood} onMood={pickMood} onQuickWater={() => addLog('water', 250)} />}
           {tab === 'squad' && <SquadTab members={members} splashing={splashing} nudged={nudged} onSplash={splashFriend} feed={feed} now={now} />}
         </div>
@@ -1758,5 +1860,6 @@ export default function CapySpa() {
         {confetti > 0 && <Confetti burst={confetti} />}
       </div>
     </div>
+    </RatiosContext.Provider>
   );
 }
