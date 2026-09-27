@@ -163,13 +163,13 @@ let seq = 0;
 const uid = (p = 'id') => `${p}-${Date.now().toString(36)}-${(seq++).toString(36)}`;
 
 // Mock sips are placed relative to "now" so the demo reads naturally at any hour.
+// The day starts at 600 ml (24%), just under the towel stage, so every unlock plays
+// in order as you tap: towel on the 1st +250 Water, yuzu on the 3rd, turtle on the 6th,
+// goal and confetti on the 8th.
 const MOCK_SIPS = [
-  ['water', 400, 480],
-  ['coffee', 200, 405, 'Americano'],
-  ['water', 250, 320],
-  ['tea', 300, 230],
-  ['water', 400, 140],
-  ['juice', 250, 45],
+  ['water', 250, 200],
+  ['coffee', 200, 120, 'Americano'],
+  ['tea', 150, 45],
 ];
 const makeInitialLogs = () => {
   const now = Date.now();
@@ -184,7 +184,7 @@ const makeInitialFriends = () => [
 const makeInitialFeed = () => [
   { id: 'f-1', text: 'Kenji unlocked the turtle buddy 🐢', ts: Date.now() - 6 * 60000 },
   { id: 'f-2', text: 'Sora logged 300 ml Green Tea 🍵', ts: Date.now() - 48 * 60000 },
-  { id: 'f-3', text: 'You unlocked yuzu floats 🍋', ts: Date.now() - 95 * 60000 },
+  { id: 'f-3', text: 'You logged 200 ml Americano ☕', ts: Date.now() - 120 * 60000 },
 ];
 
 /* ------------------------------------------------------------------ */
